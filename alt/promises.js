@@ -3,9 +3,10 @@ import * as Vsmth from './vsmth.js'
 
 const model = {
   todos: [],
-  qsgen: null,
   q: null,
-  ans: null,
+  ansf: null,
+  stopQs: null,
+  draw: null, //ugly hack?
 }
 
 function viewTodo(draw, x, i) {
@@ -24,10 +25,12 @@ function viewInputBar(draw) {
     const val = inRef.current.value;
     if (val === '') return;
     model.todos.push(val);
-    model.qsgen = qs();
-    model.qsgen.next();
+    model.stopQs?.();
+    const pr = new Promise((r, f) => {
+      qs().then(r);
+      model.stopQs = f;
+    });
     inRef.current.value = '';
-    draw();
   };
   return ['div',
     ['input', {ref: inRef, onkeypress: e => e.key == 'Enter' ? push() : ''}],
@@ -36,75 +39,68 @@ function viewInputBar(draw) {
 }
 
 
-function* qs(lo=0, hi, isTop=true) {
-  const a = model.todos;
-  hi ??= a.length - 1;
-  if (lo < hi) {
-    let pi;
-    for (const res of partition(lo, hi)) {
-      if (res === null) yield null;
-      else pi = res;
-    }
-    yield* qs(lo, pi, false);
-    yield* qs(pi + 1, hi, false);
-  }
-  if (isTop) {
-    model.q = null;
-  }
-}
 
-function ask(idx, pivot) {
-  const a = model.todos
-  if (a[idx] !== pivot) {
-    model.q = ` Is "${a[idx]}" easier than "${pivot}"? `;
-    return true;
+async function ask(a, b) {
+  if (a !== b) {
+    model.q = ` Is "${a}" easier than "${b}"? `;
+    model.draw();
+    return await new Promise((r, f) => model.ansf = r);
+    //^ is this "await" necessary?
   } else {
-    model.ans = 0;
-    return false
+    return 0;
   }
 }
 
-function* partition(lo, hi) {
+async function partition(lo, hi) {
+  console.log(`partition(${lo}, ${hi})`);
   const a = model.todos;
   const pivot = a[lo];
   let i = lo - 1;
   let j = hi + 1;
   while (true) {
-    console.log(i, j);
     do {
       i++;
-      if (ask(i, pivot)) yield null;
-    } while (model.ans < 0);
+    } while ((await ask(a[i], pivot)) < 0);
     do {
       j--;
-      if (ask(j, pivot)) yield null;
-    } while (model.ans > 0);
+    } while ((await ask(a[j], pivot)) > 0);
     if (i >= j) {
-      break;
+      return j;
     }
     [a[i], a[j]] = [a[j], a[i]];
   }
-  yield j;
 }
+
+async function qs(lo=0, hi, isTop=true) {
+  console.log(`qs(${lo}, ${hi}, ${isTop})`);
+  const a = model.todos;
+  hi ??= a.length - 1;
+  if (lo < hi) {
+    const pi = await partition(lo, hi);
+    qs(lo, pi, false);
+    qs(pi + 1, hi, false);
+  }
+  if (isTop) {
+    model.q = null;
+    model.draw();
+  }
+}
+
 
 function viewSortUI(draw) {
   if (!model.q) {
     return 'everything sorted';
   }
   const a = model.todos;
-  const ans = x => {
-    model.ans = x;
-    model.qsgen?.next();
-    draw();
-  }
   return ['div',
-    ['button', {onclick: () => ans(1)}, 'N <-'],
+    ['button', {onclick: () => model.ansf(1)}, 'N <-'],
     model.q,
-    ['button', {onclick: () => ans(-1)}, '-> Y'],
+    ['button', {onclick: () => model.ansf(-1)}, '-> Y'],
   ];
 }
 
 function view(draw) {
+  model.draw = draw; //ugly hack?
   return ['div',
     viewInputBar(draw),
     viewSortUI(draw),
